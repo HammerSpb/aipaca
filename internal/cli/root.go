@@ -62,6 +62,7 @@ func init() {
 	rootCmd.AddCommand(cleanCmd)
 	rootCmd.AddCommand(statusCmd)
 	rootCmd.AddCommand(profilesCmd)
+	rootCmd.AddCommand(backupsCmd)
 	rootCmd.AddCommand(diffCmd)
 }
 

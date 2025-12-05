@@ -209,6 +209,17 @@ func (s *Storage) GetLatestBackupForRepo(repoPath string) (*Backup, error) {
 	return &backups[0], nil // Already sorted newest first
 }
 
+// GetBackupFiles returns the list of files in a backup
+func (s *Storage) GetBackupFiles(name string) ([]string, error) {
+	backupPath := s.BackupPath(name)
+
+	if !fileutil.Exists(backupPath) {
+		return nil, fmt.Errorf("backup '%s' not found", name)
+	}
+
+	return fileutil.ListAllFiles(backupPath)
+}
+
 // parseBackupTimestamp extracts timestamp from backup name
 func parseBackupTimestamp(name string) time.Time {
 	// Format: reponame-YYYY-MM-DD-HHMMSS
