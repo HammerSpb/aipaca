@@ -35,6 +35,7 @@ func DefaultConfig() *Config {
 			".cursor",
 			".cursor/**",
 			"CLAUDE.md",
+			"**/CLAUDE.md",
 			"ai/",
 			"ai/**",
 			".ai*",
