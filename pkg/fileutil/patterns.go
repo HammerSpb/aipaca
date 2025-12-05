@@ -73,21 +73,66 @@ func getTopLevelPath(path string) string {
 }
 
 // FindAIFiles finds all AI-related files/directories in a repo based on patterns
+// Returns top-level items: directories for "dir/**" patterns, individual files for "**/file" patterns
 func FindAIFiles(repoPath string, patterns []string) ([]string, error) {
 	var results []string
 	seen := make(map[string]bool)
 
 	for _, pattern := range patterns {
-		// Clean the pattern
-		cleanPattern := strings.TrimSuffix(pattern, "/")
-		cleanPattern = strings.TrimSuffix(cleanPattern, "/**")
+		// Skip empty patterns
+		if pattern == "" {
+			continue
+		}
 
-		// Check if the path exists directly
-		fullPath := filepath.Join(repoPath, cleanPattern)
-		if _, err := os.Stat(fullPath); err == nil {
-			if !seen[cleanPattern] {
-				results = append(results, cleanPattern)
-				seen[cleanPattern] = true
+		// Check if this is a "directory contents" pattern (ends with /**)
+		if strings.HasSuffix(pattern, "/**") {
+			dirPattern := strings.TrimSuffix(pattern, "/**")
+			fullPath := filepath.Join(repoPath, dirPattern)
+			if info, err := os.Stat(fullPath); err == nil && info.IsDir() {
+				if !seen[dirPattern] {
+					results = append(results, dirPattern)
+					seen[dirPattern] = true
+				}
+			}
+			continue
+		}
+
+		// Check if pattern contains wildcards (like **/CLAUDE.md)
+		if strings.Contains(pattern, "*") {
+			fullPattern := filepath.Join(repoPath, pattern)
+			matched, err := doublestar.FilepathGlob(fullPattern)
+			if err != nil {
+				continue
+			}
+			for _, m := range matched {
+				relPath, err := filepath.Rel(repoPath, m)
+				if err != nil {
+					continue
+				}
+				// Skip if under an already-seen directory
+				skip := false
+				for seenPath := range seen {
+					if strings.HasPrefix(relPath, seenPath+string(filepath.Separator)) {
+						skip = true
+						break
+					}
+				}
+				if !skip && !seen[relPath] {
+					results = append(results, relPath)
+					seen[relPath] = true
+				}
+			}
+		} else {
+			// Clean the pattern (remove trailing /)
+			cleanPattern := strings.TrimSuffix(pattern, "/")
+
+			// Check if the path exists directly
+			fullPath := filepath.Join(repoPath, cleanPattern)
+			if _, err := os.Stat(fullPath); err == nil {
+				if !seen[cleanPattern] {
+					results = append(results, cleanPattern)
+					seen[cleanPattern] = true
+				}
 			}
 		}
 	}
@@ -97,28 +142,69 @@ func FindAIFiles(repoPath string, patterns []string) ([]string, error) {
 
 // ExpandPatterns expands patterns to actual paths in the repository
 // Returns a map of relative path -> full path
+// For directory patterns like ".claude/**", returns the directory itself
+// For file patterns like "**/CLAUDE.md", returns matched files
 func ExpandPatterns(repoPath string, patterns []string) (map[string]string, error) {
 	result := make(map[string]string)
 
 	for _, pattern := range patterns {
-		// Clean the pattern (remove trailing / and /**)
-		cleanPattern := strings.TrimSuffix(pattern, "/")
-		cleanPattern = strings.TrimSuffix(cleanPattern, "/**")
-
 		// Skip patterns that are just wildcards
-		if cleanPattern == "" || cleanPattern == "*" || cleanPattern == "**" {
+		if pattern == "" || pattern == "*" || pattern == "**" {
 			continue
 		}
 
-		fullPath := filepath.Join(repoPath, cleanPattern)
+		// Check if this is a "directory contents" pattern (ends with /**)
+		if strings.HasSuffix(pattern, "/**") {
+			// For patterns like ".claude/**", just check if the directory exists
+			dirPattern := strings.TrimSuffix(pattern, "/**")
+			fullPath := filepath.Join(repoPath, dirPattern)
+			if info, err := os.Stat(fullPath); err == nil && info.IsDir() {
+				result[dirPattern] = fullPath
+			}
+			continue
+		}
 
-		// Check if path exists
-		if _, err := os.Stat(fullPath); err == nil {
-			result[cleanPattern] = fullPath
+		// Check if pattern contains wildcards (like **/CLAUDE.md)
+		if strings.Contains(pattern, "*") {
+			// Use doublestar for glob matching
+			fullPattern := filepath.Join(repoPath, pattern)
+			matched, err := doublestar.FilepathGlob(fullPattern)
+			if err != nil {
+				continue
+			}
+			for _, m := range matched {
+				relPath, err := filepath.Rel(repoPath, m)
+				if err != nil {
+					continue
+				}
+				// Skip if parent directory is already in result
+				if !isUnderExistingPath(relPath, result) {
+					result[relPath] = m
+				}
+			}
+		} else {
+			// Clean the pattern (remove trailing /)
+			cleanPattern := strings.TrimSuffix(pattern, "/")
+			fullPath := filepath.Join(repoPath, cleanPattern)
+
+			// Check if path exists
+			if _, err := os.Stat(fullPath); err == nil {
+				result[cleanPattern] = fullPath
+			}
 		}
 	}
 
 	return result, nil
+}
+
+// isUnderExistingPath checks if path is under any existing path in the result map
+func isUnderExistingPath(path string, existing map[string]string) bool {
+	for existingPath := range existing {
+		if strings.HasPrefix(path, existingPath+string(filepath.Separator)) {
+			return true
+		}
+	}
+	return false
 }
 
 // IsAIFile checks if a path matches any AI file pattern
